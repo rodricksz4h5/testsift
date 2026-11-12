@@ -1,0 +1,21 @@
+name: testsift
+version: 1.0.0
+author: rodricksz4h5
+description: >-
+  Exact, local analysis of JUnit XML test reports (pytest --junitxml, Maven
+  Surefire, Gradle, Jest/Vitest junit reporters, go-junit-report, PHPUnit, .NET,
+  CI artifacts), from one file or a directory of them. test_report_summary gives
+  exact pass/fail/error/skip counts, failures grouped by cause (messages that
+  differ only in numbers, ids or quoted values share a group), the slowest tests
+  and flaky suspects; test_report_failures lists failing tests with type, message,
+  file/line and the start and end of the trace; test_report_compare diffs two runs
+  into newly failing, fixed, still failing, added, removed and much slower tests.
+  Streamed, standard library only: no network, no credentials, no third-party
+  dependencies, no self-update; DOCTYPE and entity declarations are refused.
+  Disclosure: reads the local report paths you pass it (read-only), only regular
+  files, and honours Hermes' core read denylist.
+requires_hermes: ">=0.22.0"
+provides_tools:
+  - test_report_summary
+  - test_report_failures
+  - test_report_compare
