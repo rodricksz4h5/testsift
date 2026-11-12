@@ -445,19 +445,46 @@ class _Run:
 # --- Failure signatures -----------------------------------------------------------
 _MASKS = [
     (re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"), "<UUID>"),
+    (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?\b"), "<IP>"),
     (re.compile(r"\b0x[0-9a-fA-F]+\b"), "<HEX>"),
     (re.compile(r"\b[0-9a-fA-F]{32,64}\b"), "<HEX>"),
     (re.compile(r"\"[^\"]*\"|'[^']*'"), "<STR>"),
     (re.compile(r"-?\b\d[\d.,]*\b"), "<NUM>"),
 ]
 _WS_RX = re.compile(r"\s+")
+# Messages some emitters write for every failure (go-junit-report and gotestsum
+# use "Failed"); they say nothing about the cause, so the trace is used instead.
+_GENERIC_MESSAGES = {"failed", "failure", "fail", "error", "test failed"}
+# Runner chatter in Go test output that precedes the actual failure line.
+_GO_NOISE_RX = re.compile(r"^(?:=== (?:RUN|PAUSE|CONT|NAME)\b|--- (?:FAIL|PASS|SKIP):|FAIL\b|PASS\b|ok\b)")
+# pytest wraps fixture errors: failed on setup with "RuntimeError: ...".
+_PYTEST_PHASE_RX = re.compile(r'^failed on (setup|teardown) with "(.*)"$', re.S)
+
+
+def _informative_line(text: str) -> str:
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not _GO_NOISE_RX.match(line):
+            return line
+    return ""
+
+
+def _cause_text(case: dict) -> str:
+    """The line that best states why a test failed, before masking."""
+    text = _first_line(case["message"])
+    if text.lower().rstrip(".") in _GENERIC_MESSAGES:
+        text = ""
+    if not text and case["detail"] is not None:
+        text = _informative_line(case["detail"].head)
+    phase = _PYTEST_PHASE_RX.match(text)
+    if phase:
+        text = f"{phase.group(1)}: {phase.group(2)}"
+    return text
 
 
 def _signature(case: dict) -> str:
     """A cause key shared by failures that differ only in variable values."""
-    text = _first_line(case["message"])
-    if not text and case["detail"] is not None:
-        text = _first_line(case["detail"].head)
+    text = _cause_text(case)
     for rx, repl in _MASKS:
         text = rx.sub(repl, text)
     text = _WS_RX.sub(" ", text).strip()[:300]
@@ -602,8 +629,7 @@ def test_report_summary(args: dict, **kwargs) -> str:
         group = groups.setdefault(sig, {"signature": sig, "count": 0, "example_message": "", "tests": []})
         group["count"] += 1
         if not group["example_message"]:
-            group["example_message"] = (_first_line(case["message"]) or
-                                        (_first_line(case["detail"].head) if case["detail"] else ""))[:300]
+            group["example_message"] = _cause_text(case)[:300]
         if len(group["tests"]) < EXAMPLES_PER_GROUP:
             group["tests"].append(test_id)
         suite_failures[case["suite"] or case["classname"] or "<no suite>"] += 1
@@ -703,8 +729,7 @@ def test_report_compare(args: dict, **kwargs) -> str:
         case = entry["case"]
         out: dict[str, Any] = {"test": test_id, "status": entry["status"]}
         if entry["status"] in bad:
-            out["message"] = (_first_line(case["message"]) or
-                              (_first_line(case["detail"].head) if case["detail"] else ""))[:300]
+            out["message"] = _cause_text(case)[:300]
         return out
 
     newly_failing, fixed, still_failing, added, removed, slower = [], [], [], [], [], []

@@ -19,12 +19,21 @@ Three things a model can't do reliably over a file it can't read whole:
   (`target/surefire-reports/`, a downloaded CI artifact).
 - **Failures grouped by cause.** 300 failing tests are often one or two root
   causes. Messages that differ only in numbers, ids, hashes or quoted values
-  share a group:
+  share a group (real output on a pytest report):
 
   ```
-  AssertionError: AssertionError: expected even, got <NUM>    x2
+  failed: AssertionError: expected even, got <NUM>              x2
       test_sample::test_parity[3], test_sample::test_parity[17]
+  error: setup: RuntimeError: database not reachable at <IP>    x1
+      test_sample::test_uses_broken
   ```
+
+  The cause is the failure message, or, when an emitter writes the same
+  placeholder for every failure (Go's `go-junit-report` and `gotestsum` write
+  `Failed`), the first line of the trace that isn't Go runner output
+  (`=== RUN`, `--- FAIL`). pytest's `failed on setup with "..."` wrapper is
+  unwrapped to the error inside it. Grouping is by text, so it is a strong hint
+  about shared causes, not a proof.
 
 - **Run-to-run diffs.** Given a baseline run and a new run, which tests
   *newly* fail, which were fixed, which were already failing, what was added or
