@@ -59,8 +59,8 @@ skipped and listed in `files_skipped`.
 Returns `tests`, `passed`, `failed`, `errors`, `skipped`, `duration_seconds`,
 `failure_groups:[{signature,count,example_message,tests}]`,
 `suites_with_most_failures`, `slowest:[{test,seconds}]` and `flaky_suspects`
-(tests with Surefire `flakyFailure`/`rerunFailure` entries, or the same test id
-both passing and failing in the input).
+(tests with Surefire `flakyFailure`/`flakyError` entries, i.e. failed and then
+passed on a rerun, or the same test id both passing and failing in the input).
 
 ### `test_report_failures`
 
@@ -85,6 +85,7 @@ Each failure has `test` (`classname::name`), `status` (`failed` or `error`),
 | `limit` | integer | no | `50` | entries per list (cap 500) |
 
 Returns totals for both sides and `newly_failing`, `added_failing`, `fixed`,
+`newly_skipped` (passed before, skipped now, which can hide a regression),
 `still_failing`, `added`, `removed` and `slower` (at least twice as slow and at
 least one second slower), each with a `*_total` count.
 
@@ -94,8 +95,10 @@ least one second slower), each with a `*_total` count.
   classname). When the same id appears more than once, the worst status wins
   (error > failed > skipped > passed) and its times are added up.
 - A test case with both `<failure>` and `<error>` counts as an error.
-- Surefire reruns (`flakyFailure`, `flakyError`, `rerunFailure`, `rerunError`)
-  don't change the final status; they mark the test as a flaky suspect.
+- Surefire reruns don't change the final status. `flakyFailure`/`flakyError`
+  (failed, then passed) mark the test as a flaky suspect; `rerunFailure`/
+  `rerunError` (every rerun failed too) are a consistent failure, reported as
+  `failed_reruns` on that failure.
 - `time` attributes that aren't a non-negative number are ignored. A thousands
   separator is accepted only together with a decimal point (`1,234.5`), since
   `1,5` is ambiguous.
@@ -109,7 +112,10 @@ least one second slower), each with a `*_total` count.
 - **Honours Hermes' read denylist.** Inside the agent every file, including
   each file found in a directory, goes through the same check Core's
   `read_file` uses, so credential stores, internal caches and `.env` files are
-  refused, also through symlinks.
+  refused, also through symlinks. Like Core, the check runs on the path as
+  given as well as on its absolute form, so Windows NT namespace paths
+  (`\??\`, `\\?\UNC\`, `\\.\`, GLOBALROOT) are refused before anything
+  touches them.
 - **Regular files only.** Paths under `/proc` and `/dev` (including symlinks
   that resolve there) are refused, and so is anything that isn't a regular
   file (FIFOs, sockets, devices), before it is opened. Symlinked directories

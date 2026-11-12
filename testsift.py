@@ -55,7 +55,10 @@ EXAMPLES_PER_GROUP = 5
 # Worst status wins when a test case carries several result elements, and when
 # the same test id appears more than once.
 _RANK = {"passed": 0, "skipped": 1, "failed": 2, "error": 3}
-_FLAKY_TAGS = {"flakyFailure", "flakyError", "rerunFailure", "rerunError"}
+# Surefire reruns: flaky* = failed, then passed on a rerun; rerun* = every rerun
+# failed too (a consistent failure, so not flaky).
+_FLAKY_TAGS = {"flakyFailure", "flakyError"}
+_RERUN_TAGS = {"rerunFailure", "rerunError"}
 
 
 # --- Paths (same guards as Hermes' read_file) -------------------------------------
@@ -102,7 +105,10 @@ def _check(path: str) -> int:
 
     Runs before anything is opened; ``stat`` does not open the file.
     """
-    blocked = _read_block_error(os.path.abspath(path))
+    # The raw string is checked too, as Core does: abspath() turns an NT namespace
+    # path such as \??\UNC\host\share into C:\??\..., which the check no longer
+    # recognises, while stat() on the raw path would still reach the network.
+    blocked = _read_block_error(path) or _read_block_error(os.path.abspath(path))
     if blocked:
         raise ValueError(blocked)
     if _under_refused_root(path):
@@ -277,7 +283,9 @@ def _parse_file(path: str, on_case: Callable[[dict], bool]) -> dict:
                     case["status"] = "skipped"
                     case["message"] = (attrs.get("message") or "")[:MESSAGE_CHARS]
             elif name in _FLAKY_TAGS:
-                case["reruns"] += 1
+                case["flaky_reruns"] += 1
+            elif name in _RERUN_TAGS:
+                case["failed_reruns"] += 1
             elif name == "system-out":
                 capture = case["out"]
             elif name == "system-err":
@@ -298,7 +306,8 @@ def _parse_file(path: str, on_case: Callable[[dict], bool]) -> dict:
                 "message": "",
                 "detail": None,
                 "extra_results": 0,
-                "reruns": 0,
+                "flaky_reruns": 0,
+                "failed_reruns": 0,
                 "out": _Clip(OUTPUT_CHARS * 2),
                 "err": _Clip(OUTPUT_CHARS * 2),
             }
@@ -579,8 +588,9 @@ TEST_REPORT_COMPARE = {
     "name": "test_report_compare",
     "description": (
         "Compare two local JUnit XML test runs (e.g. main vs a branch, or before vs "
-        "after a change): tests that newly fail, tests that were fixed, tests still "
-        "failing, tests added or removed, and tests that became much slower (at least "
+        "after a change): tests that newly fail, tests that were fixed, tests that "
+        "passed before and are skipped now, tests still failing, tests added or "
+        "removed, and tests that became much slower (at least "
         "twice as slow and one second slower). Tests are matched by classname and name."
     ),
     "parameters": {
@@ -640,7 +650,7 @@ def test_report_summary(args: dict, **kwargs) -> str:
 
     flaky = sorted(
         test_id for test_id, entry in tests.items()
-        if entry["case"]["reruns"] or ({"passed"} < entry["statuses"] and entry["statuses"] & {"failed", "error"})
+        if entry["case"]["flaky_reruns"] or ("passed" in entry["statuses"] and entry["statuses"] & {"failed", "error"})
     )
     return json.dumps({
         "ok": True,
@@ -699,6 +709,8 @@ def test_report_failures(args: dict, **kwargs) -> str:
             item["seconds"] = case["time"]
         if case["extra_results"]:
             item["more_results_in_case"] = case["extra_results"]
+        if case["failed_reruns"]:
+            item["failed_reruns"] = case["failed_reruns"]
         if include_output:
             item["system_out_tail"] = case["out"].tail_text(OUTPUT_CHARS)
             item["system_err_tail"] = case["err"].tail_text(OUTPUT_CHARS)
@@ -733,6 +745,7 @@ def test_report_compare(args: dict, **kwargs) -> str:
         return out
 
     newly_failing, fixed, still_failing, added, removed, slower = [], [], [], [], [], []
+    newly_skipped = []
     for test_id in sorted(new):
         now = new[test_id]
         was = old.get(test_id)
@@ -745,6 +758,8 @@ def test_report_compare(args: dict, **kwargs) -> str:
             still_failing.append(brief(test_id, now))
         elif was["status"] in bad:
             fixed.append({"test": test_id, "status": now["status"], "was": was["status"]})
+        elif now["status"] == "skipped" and was["status"] == "passed":
+            newly_skipped.append({"test": test_id, "was": "passed"})
         if was["time"] is not None and now["time"] is not None:
             delta = now["time"] - was["time"]
             if delta >= 1.0 and now["time"] >= 2 * was["time"]:
@@ -771,6 +786,8 @@ def test_report_compare(args: dict, **kwargs) -> str:
         "added_failing": added_failing[:limit],
         "fixed_total": len(fixed),
         "fixed": fixed[:limit],
+        "newly_skipped_total": len(newly_skipped),
+        "newly_skipped": newly_skipped[:limit],
         "still_failing_total": len(still_failing),
         "still_failing": still_failing[:limit],
         "added_total": len(added),

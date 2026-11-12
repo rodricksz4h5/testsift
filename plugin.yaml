@@ -9,7 +9,8 @@ description: >-
   differ only in numbers, ids or quoted values share a group), the slowest tests
   and flaky suspects; test_report_failures lists failing tests with type, message,
   file/line and the start and end of the trace; test_report_compare diffs two runs
-  into newly failing, fixed, still failing, added, removed and much slower tests.
+  into newly failing, fixed, newly skipped, still failing, added, removed and
+  much slower tests.
   Streamed, standard library only: no network, no credentials, no third-party
   dependencies, no self-update; DOCTYPE and entity declarations are refused.
   Disclosure: reads the local report paths you pass it (read-only), only regular
